@@ -48,7 +48,34 @@ public class CreateOrderCommandHandler
 
         _orderRepository.Add(order);
 
-        return await _orderRepository.UnitOfWork.SaveEntitiesAsync(cancellationToken);
+        // Sipariş kaydedilir ve domain olayları işlenir
+        var result = await _orderRepository.UnitOfWork.SaveEntitiesAsync(cancellationToken);
+
+        if (result)
+        {
+            // Toplam tutarı hesapla
+            var orderTotal = order.GetTotal();
+
+            // Ödeme işlemini başlat
+            var processPaymentCommand = new ProcessOrderPaymentCommand(
+                order.Id,
+                message.UserId,
+                orderTotal,
+                message.CardNumber,
+                message.CardHolderName,
+                message.CardExpiration,
+                message.CardSecurityNumber);
+
+            _logger.LogInformation(
+                "Sending process payment command, OrderId: {OrderId}, Amount: {Amount}",
+                processPaymentCommand.OrderId,
+                processPaymentCommand.Amount);
+
+            // ProcessOrderPaymentCommand'i gönder
+            await _mediator.Send(processPaymentCommand, cancellationToken);
+        }
+
+        return result;
     }
 }
 

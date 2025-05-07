@@ -1,0 +1,168 @@
+---
+description: 
+globs: *.cs
+alwaysApply: false
+---
+# Command Handler Best Practices
+
+## Core Principles
+
+1. **Single Responsibility**: Each command handler should handle one specific command and perform a single logical operation.
+2. **Dependency Injection**: Command handlers should receive dependencies through constructor injection.
+3. **Asynchronous Processing**: Use async/await pattern for I/O operations to ensure scalability.
+4. **Result Communication**: Return appropriate types that communicate the success or failure of the operation.
+5. **Error Handling**: Implement proper error handling and validation.
+
+## Best Practices
+
+### Structure and Organization
+
+```csharp
+public class CommandHandler : IRequestHandler<Command, ResultType>
+{
+    private readonly IDependency _dependency;
+
+    public CommandHandler(IDependency dependency)
+    {
+        _dependency = dependency;
+    }
+
+    public async Task<ResultType> Handle(Command command, CancellationToken cancellationToken)
+    {
+        // Implementation
+    }
+}
+```
+
+### Dependency Management
+
+- Use constructor injection for dependencies
+- Keep dependencies minimal and focused
+- Consider using interfaces for easier testing and decoupling
+
+### Command Processing
+
+- Validate commands before processing
+- Use domain entities to encapsulate business logic
+- Keep command handlers thin - business logic should live in the domain
+- Return appropriate results (boolean, entity, custom result object)
+
+### Idempotency
+
+For operations that need to be idempotent (safe to retry):
+
+```csharp
+public class IdentifiedCommandHandler<TCommand, TResult>
+{
+    // Implementation ensuring the command is only processed once
+    
+    protected virtual TResult CreateResultForDuplicateRequest()
+    {
+        // Return appropriate result for duplicate requests
+    }
+}
+```
+
+### Error Handling
+
+- Handle domain-specific errors within the handler
+- Use result types that can communicate success/failure
+- Consider throwing exceptions only for truly exceptional scenarios
+- Log errors at appropriate levels
+
+### Testing
+
+- Unit test handlers in isolation with mocked dependencies
+- Integration test the full command processing path
+- Test edge cases and error scenarios
+
+## Advanced Patterns
+
+### Validation
+
+Consider implementing validation as a separate concern:
+
+```csharp
+// Using FluentValidation or similar library
+public class CommandValidator : AbstractValidator<Command>
+{
+    public CommandValidator()
+    {
+        RuleFor(x => x.Property).NotEmpty();
+    }
+}
+```
+
+### Decorator Pattern
+
+Use decorators to add cross-cutting concerns:
+
+```csharp
+public class LoggingDecorator<TCommand, TResult> : IRequestHandler<TCommand, TResult>
+    where TCommand : IRequest<TResult>
+{
+    private readonly IRequestHandler<TCommand, TResult> _inner;
+    private readonly ILogger _logger;
+
+    // Implementation that adds logging around the inner handler
+}
+```
+
+### Event Publishing
+
+Consider publishing domain events after successful command execution:
+
+```csharp
+public async Task<ResultType> Handle(Command command, CancellationToken cancellationToken)
+{
+    // Process command
+    
+    // Publish events
+    await _eventPublisher.PublishAsync(new CommandCompletedEvent(command.Id));
+    
+    return result;
+}
+```
+
+## Common Mistakes to Avoid
+
+1. Putting business logic in command handlers instead of domain entities
+2. Not handling concurrency issues
+3. Missing proper error handling
+4. Not implementing idempotency for operations that need it
+5. Not validating commands before processing
+
+## Example Implementation
+
+From the given example:
+
+```csharp
+public class CancelOrderCommandHandler : IRequestHandler<CancelOrderCommand, bool>
+{
+    private readonly IOrderRepository _orderRepository;
+
+    public CancelOrderCommandHandler(IOrderRepository orderRepository)
+    {
+        _orderRepository = orderRepository;
+    }
+
+    public async Task<bool> Handle(CancelOrderCommand command, CancellationToken cancellationToken)
+    {
+        var orderToUpdate = await _orderRepository.GetAsync(command.OrderNumber);
+        if (orderToUpdate == null)
+        {
+            return false;
+        }
+
+        orderToUpdate.SetCancelledStatus();
+        return await _orderRepository.UnitOfWork.SaveEntitiesAsync(cancellationToken);
+    }
+}
+```
+
+This handler demonstrates:
+- Single responsibility - handles only cancellation
+- Proper dependency injection
+- Domain-driven design - business logic in the entity (`SetCancelledStatus()`)
+- Proper result communication
+- Basic error handling 

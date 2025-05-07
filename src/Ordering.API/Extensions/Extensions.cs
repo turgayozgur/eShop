@@ -1,4 +1,6 @@
-﻿internal static class Extensions
+﻿using Polly;
+
+internal static class Extensions
 {
     public static void AddApplicationServices(this IHostApplicationBuilder builder)
     {
@@ -6,6 +8,33 @@
         
         // Add the authentication services to DI
         builder.AddDefaultAuthentication();
+
+        // Üçüncü parti servislerle iletişim için HTTP istemcisini ekle
+        services.AddHttpClient();
+        
+        // Ödeme servisi için resilient HTTP client'ı ekle
+        services.AddHttpClient("PaymentGateway", client =>
+        {
+            client.BaseAddress = new Uri(builder.Configuration["PaymentGateway:Url"] ?? "http://payment-gateway");
+            client.DefaultRequestHeaders.Add("Accept", "application/json");
+            client.Timeout = TimeSpan.FromSeconds(5); // 5 saniye timeout
+        })
+        .AddStandardResilienceHandler(options =>
+        {
+            // Retry yapılandırması
+            options.Retry.MaxRetryAttempts = 3;
+            options.Retry.BackoffType = DelayBackoffType.Exponential;
+            options.Retry.UseJitter = true; // Jitter ekleyerek isteklerin aynı anda gelmesini önle
+
+            // Circuit breaker yapılandırması
+            options.CircuitBreaker.SamplingDuration = TimeSpan.FromMinutes(1);
+            options.CircuitBreaker.FailureRatio = 0.5; // 50% başarısızlık oranında
+            options.CircuitBreaker.MinimumThroughput = 5; // En az 5 istek
+            options.CircuitBreaker.BreakDuration = TimeSpan.FromSeconds(30);
+            
+            // Timeout yapılandırması
+            //options.Timeout.Timeout = TimeSpan.FromSeconds(5);
+        });
 
         // Pooling is disabled because of the following error:
         // Unhandled exception. System.InvalidOperationException:
@@ -49,6 +78,12 @@
         services.AddScoped<IBuyerRepository, BuyerRepository>();
         services.AddScoped<IOrderRepository, OrderRepository>();
         services.AddScoped<IRequestManager, RequestManager>();
+        
+        // Ödeme servisini kaydet
+        services.AddTransient<IPaymentService, PaymentService>();
+        
+        // Stripe ödeme servisini kaydet
+        services.AddTransient<IStripePaymentService, StripePaymentService>();
     }
 
     private static void AddEventBusSubscriptions(this IEventBusBuilder eventBus)
@@ -58,5 +93,6 @@
         eventBus.AddSubscription<OrderStockRejectedIntegrationEvent, OrderStockRejectedIntegrationEventHandler>();
         eventBus.AddSubscription<OrderPaymentFailedIntegrationEvent, OrderPaymentFailedIntegrationEventHandler>();
         eventBus.AddSubscription<OrderPaymentSucceededIntegrationEvent, OrderPaymentSucceededIntegrationEventHandler>();
+        eventBus.AddSubscription<OrderPaymentConfirmedIntegrationEvent, OrderPaymentConfirmedIntegrationEventHandler>();
     }
 }
